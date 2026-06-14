@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base & Reset ──────────────────────────────────────────── */
+@layer base {
+  * {
+    @apply box-border;
+  }
+
+  body {
+    /* Using navy-900 which exists in config */
+    @apply bg-navy-900 text-chalk-100 font-sans antialiased;
+  }
+
+  /* Custom scrollbar matching your theme shades */
+  ::-webkit-scrollbar        { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track  { @apply bg-transparent; }
+  /* FIXED: Changed 500/600 to 600/700 which exist in your tailwind config */
+  ::-webkit-scrollbar-thumb  { @apply bg-navy-600 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-navy-700; }
+}
+
+/* ── Component Shortcuts ───────────────────────────────────── */
+@layer components {
+  .glass-card {
+    @apply bg-navy-700 border border-white/5 rounded-2xl shadow-card;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
+           bg-amber-400 text-navy-900 hover:bg-amber-500 active:scale-95
+           transition-all duration-200 disabled:opacity-50;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl bg-navy-800 border border-white/10
+           text-chalk-100 placeholder:text-chalk-400
+           focus:outline-none focus:border-amber-400/50 
+           transition-all duration-200;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold text-chalk-100;
+  }
+
+  .text-muted {
+    @apply text-chalk-400 text-sm;
+  }
+
+  .skeleton {
+    /* FIXED: Using 600 instead of 800 for better visibility against 900 bg */
+    @apply bg-navy-600 animate-pulse rounded-lg;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+}

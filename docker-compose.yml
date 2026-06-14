@@ -1,0 +1,182 @@
+# ─────────────────────────────────────────────────────────────────
+#  Virtual Classroom V2 — Full Development Stack
+#
+#  Services: postgres, mongo, redis, keycloak, minio, backend, frontend
+#  All services share the `classroom-net` Docker network.
+#
+#  SWAP-OUT GUIDE FOR PRODUCTION:
+#   PostgreSQL  →  Neon Postgres  (set DATABASE_URL in .env)
+#   Redis       →  Upstash Redis  (set REDIS_URL in .env)
+#   MongoDB     →  MongoDB Atlas  (set MONGO_URI in .env)
+#   MinIO       →  AWS S3         (set S3_* vars in .env)
+# ─────────────────────────────────────────────────────────────────
+
+networks:
+  classroom-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  minio_data:
+
+services:
+
+  # ── PostgreSQL (relational — users, classrooms, assignments, submissions)
+  postgres:
+    image: postgres:15-alpine
+    container_name: vc_postgres
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vcadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vcpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-virtualclassroom}
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vcadmin} -d ${POSTGRES_DB:-virtualclassroom}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MongoDB (chat buckets, study material metadata)
+  mongo:
+    image: mongo:7
+    container_name: vc_mongo
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-vcmongo}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-vcmongo}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-virtualclassroom}
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.adminCommand("ping")']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # ── Redis (Socket.io Pub/Sub adapter + session caching)
+  redis:
+    image: redis:7-alpine
+    container_name: vc_redis
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    command: redis-server --requirepass ${REDIS_PASSWORD:-vcredis}
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-vcredis}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Keycloak (Identity Provider — OIDC / SSO)
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: vc_keycloak
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME_URL: http://localhost:8080
+      KC_HOSTNAME_STRICT: 'false'
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-virtualclassroom}
+      KC_DB_USERNAME: ${POSTGRES_USER:-vcadmin}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-vcpassword}
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── MinIO (S3-compatible object store for file uploads)
+  minio:
+    image: minio/minio:latest
+    container_name: vc_minio
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vcminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-vcminio123}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend (Node.js Express + Socket.io + Yjs)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vc_backend
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    ports:
+      - '8000:8000'
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    environment:
+      # Override URLs to use Docker service names internally
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vcadmin}:${POSTGRES_PASSWORD:-vcpassword}@postgres:5432/${POSTGRES_DB:-virtualclassroom}
+      MONGO_URI: mongodb://${MONGO_USER:-vcmongo}:${MONGO_PASSWORD:-vcmongo}@mongo:27017/${MONGO_DB:-virtualclassroom}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-vcredis}@redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+    command: npm run dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  # ── Frontend (Vite React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vc_frontend
+    restart: unless-stopped
+    networks:
+      - classroom-net
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    command: npm run dev -- --host
+    depends_on:
+      - backend

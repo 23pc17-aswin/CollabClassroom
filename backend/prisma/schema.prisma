@@ -1,0 +1,159 @@
+generator client {
+  provider        = "prisma-client-js"
+  binaryTargets   = ["native", "linux-musl"]
+  // Enables support for multiple schemas in one DB
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Tells Prisma to only manage the 'app' schema
+  schemas  = ["app"]
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+
+  @@schema("app")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  keycloakId   String?   @unique
+  email        String    @unique
+  name         String
+  userId       String    @unique // Roll Number
+  role         Role      @default(STUDENT)
+  isActive     Boolean   @default(true)
+  
+  github       String?
+  linkedin     String?
+  leetcode     String?
+  resumeUrl    String?
+  avatarUrl    String?
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  taughtClassrooms Classroom[]           @relation("TeacherRelation")
+  enrollments      ClassroomEnrollment[]
+  submissions      Submission[]
+  testAttempts     TestAttempt[]
+
+  @@schema("app")
+}
+
+model Classroom {
+  id          String   @id @default(uuid())
+  name        String
+  subject     String
+  code        String   @unique
+  description String?
+  isArchived  Boolean  @default(false)
+  teacherId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  teacher     User                  @relation("TeacherRelation", fields: [teacherId], references: [id])
+  enrollments ClassroomEnrollment[]
+  assignments Assignment[]
+  tests       Test[]
+
+  @@schema("app")
+}
+
+model ClassroomEnrollment {
+  userId      String
+  classroomId String
+  joinedAt    DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id])
+  classroom Classroom @relation(fields: [classroomId], references: [id])
+
+  @@id([userId, classroomId])
+  @@schema("app")
+}
+
+model Assignment {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  dueDate     DateTime
+  maxMarks    Int      @default(100)
+  classroomId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  classroom   Classroom    @relation(fields: [classroomId], references: [id])
+  submissions Submission[]
+
+  @@schema("app")
+}
+
+model Submission {
+  id           String   @id @default(uuid())
+  assignmentId String
+  userId       String
+  fileKey      String
+  submittedAt  DateTime @default(now())
+  grade        Float?
+  feedback     String?
+  isLate       Boolean  @default(false)
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([assignmentId, userId])
+  @@schema("app")
+}
+
+model Test {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  duration    Int      // minutes
+  scheduledAt DateTime
+  totalMarks  Int      @default(100)
+  isPublished Boolean  @default(false)
+  classroomId String
+  createdAt   DateTime @default(now())
+
+  classroom Classroom      @relation(fields: [classroomId], references: [id])
+  questions TestQuestion[]
+  attempts  TestAttempt[]
+
+  @@schema("app")
+}
+
+model TestQuestion {
+  id            String @id @default(uuid())
+  testId        String
+  questionText  String
+  options       Json
+  correctAnswer String
+  marks         Int    @default(1)
+  order         Int
+
+  test Test @relation(fields: [testId], references: [id])
+
+  @@schema("app")
+}
+
+model TestAttempt {
+  id          String   @id @default(uuid())
+  testId      String
+  userId      String
+  answers     Json
+  score       Float?
+  submittedAt DateTime @default(now())
+  timeTaken   Int?
+
+  test Test @relation(fields: [testId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([testId, userId])
+  @@schema("app")
+}
